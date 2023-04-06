@@ -88,13 +88,18 @@ function ProcessPlaylist($id) {
                     $id = $track.track.id
                     $url = $privateApiGetLyrics -replace "{id}", $id
 
-                    try {
-                        Write-Verbose "Got lyrics for $($track.track.name)"
-                        $songNameSanitised = "$($track.track.name) - $($track.track.artists[0].name)".Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
-                        $songFileName = "$songNameSanitised.txt"
+                    $songNameSanitised = "$($track.track.name) - $($track.track.artists[0].name)".Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
+                    $songFileName = "$songNameSanitised.txt"
 
+                    # skip lyrics we've already fetched - unlike playlist contents, we don't expect them to vary over time
+                    if (Test-Path $songFileName -PathType Leaf) {
+                        continue
+                    }
+
+                    try {
                         $lyrics = Invoke-RestMethod -Uri "$url" -Method GET -Headers $privateApiHeaders
                         $lyrics.lyrics.lines | ForEach-Object { $_.words } | Set-Content $songFileName
+                        Write-Verbose "Got lyrics for $($track.track.name)"
                     }
                     catch {
                         Write-Warning "No lyrics found for $($track.track.name) ($id)"

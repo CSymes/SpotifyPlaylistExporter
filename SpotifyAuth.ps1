@@ -1,3 +1,4 @@
+# Do everything by the books, using OAuth with an app registration etc.
 function GetSpotifyAccessToken() {
     # load details about the app we're running as from disk
     $clientDetails = Get-Content "app_details.secret.json" | ConvertFrom-Json
@@ -79,4 +80,22 @@ function GetSpotifyAccessToken() {
     Write-Host "Got access token!"
 
     return $tokenResponse.access_token
+}
+
+# Cheeky user impersonation to get a more powerful user access token
+function GetWebPlayerAccessToken() {
+    # the web player's access token generation URL
+    $tokenGenerator = "https://open.spotify.com/get_access_token"
+
+    # open in the user's browser, and (provided they're logged in), get their own personal token (:O!)
+    Start-Process $tokenGenerator
+    $tokenResponse = (Read-Host "Enter the provided JSON token response:") | ConvertFrom-Json
+
+    # log out the time until the token expires - usually somewhere in the range of an hour, but I'm not sure when they reissue
+    $expiryDeltaSeconds = $tokenResponse.accessTokenExpirationTimestampMs / 1000 - (Get-Date -UFormat %s)
+    $expiryDeltaMinutes = [math]::Round($expiryDeltaSeconds / 60)
+
+    Write-Host "Got webplayer access token, expires in ${expiryDeltaMinutes}min"
+
+    return $tokenResponse.accessToken
 }
