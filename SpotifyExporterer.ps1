@@ -90,24 +90,28 @@ function ProcessPlaylist($id) {
                 $trackIndex = 0
                 foreach ($track in $pl.items) {
                     ++$trackIndex
-                    $id = $track.track.id
 
-                    $songNameSanitised = "$trackIndex. $($track.track.name) - $($track.track.artists[0].name)".Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
-                    $songFileName = "$songNameSanitised.txt"
+                    $id = $track.track.id
+                    $trackName = $track.track.name
+                    $trackArtist = $track.track.artists[0].name
+
+                    $fqName = "$trackIndex. $trackName - $trackArtist"
+                    $fqNameSanitised = $fqName.Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
+                    $lyricsFileName = "$fqNameSanitised.txt"
                 
                     # skip lyrics we've already fetched - unlike playlist contents, we don't expect them to vary over time
-                    if (Test-Path $songFileName -PathType Leaf) {
+                    if (Test-Path $lyricsFileName -PathType Leaf) {
                         continue
                     }
                     else {
                         $lyrics = GetTrackLyrics $id
 
                         if ($null -ne $lyrics) {
-                            Write-Verbose "Got lyrics for $($track.track.name)"
-                            $lyrics | Set-Content $songFileName
+                            Write-Verbose "Got lyrics for $fqName"
+                            $lyrics | Set-Content -LiteralPath $lyricsFileName
                         }
                         else {
-                            Write-Warning "No lyrics found for $($track.track.name) ($id)"
+                            Write-Warning "No lyrics found for $fqName ($id)"
                         }
                     }
                 }
@@ -126,7 +130,7 @@ function ProcessPlaylist($id) {
         }
     }
 
-    $tracks | ConvertTo-Json -Depth 10 | Set-Content "$nameSanitised.json"
+    $tracks | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath "$nameSanitised.json"
 }
 
 function GetTrackLyrics($id) {
