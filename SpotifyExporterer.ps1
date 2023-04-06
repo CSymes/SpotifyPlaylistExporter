@@ -1,62 +1,28 @@
+param(
+    [switch] $getLyrics = $false,
+    [switch] $fetchAllPlaylists = $false
+)
+
 $ErrorActionPreference = "Stop"
 
-. ./SpotifyAuth.ps1
-
+# general API endpoint consts
 $apiBase = "https://api.spotify.com/v1"
 $apiGetMe = "/me"
 $apiGetPlaylist = "/playlists/{id}"
 $apiGetPlaylistItems = "/playlists/{id}/tracks"
 $privateApiGetLyrics = "https://spclient.wg.spotify.com/color-lyrics/v2/track/{id}?format=json&vocalRemoval=false";
 
-$token = GetSpotifyAccessToken
 
 
+function DetermineCallingUser() {
+    $meResponse = Invoke-RestMethod -Uri "$apiBase$apiGetMe" -Method GET -Headers $headers
 
-if (!(Test-Path "spotifyfolders.py" -PathType Leaf)) {
-    Write-Host "Spotify folder scraper not found, downloading..."
+    Write-Host "Running as $($meResponse.display_name) ($($meResponse.id))"
 
-    Invoke-WebRequest "https://git.io/folders" -OutFile "spotifyfolders.py"
+    return $meResponse.id
 }
-
-$headers = @{
-    "Authorization" = "Bearer " + $token
-    "Content-Type" = "application/json"
-}
-
-$getLyrics = $false
-$privateApiHeaders = @{
-    "Authorization" = "Bearer " + $token
-    "App-Platform" = "WebPlayer"
-}
-
-$meResponse = Invoke-RestMethod -Uri "$apiBase$apiGetMe" -Method GET -Headers $headers
-$me = $meResponse.id
-
-
-
-# $nextPlaylistsPageUrl = "$apiBase$apiGetUsersPlaylists";
-# while($true) {
-#     $playlistsPage = Invoke-RestMethod -Uri "$nextPlaylistsPageUrl" -Method GET -Headers $headers
-
-#     Write-Host "Got page at: $($playlistsPage.offset) + ~$($playlistsPage.limit) / $($playlistsPage.total)"
-
-#     foreach ($pl in $playlistsPage.items) {
-#         Write-Host "`t$($pl.name)"
-#     }
-
-#     if ($playlistsPage.next -ne $null) {
-#         $nextPlaylistsPageUrl = $playlistsPage.next
-#     } else {
-#         Write-Host "No more pages, breaking"
-#         break
-#     }
-# }
-
 
 function ProcessFolder($item, $indentation) {
-    # Write-Host $indentation
-    # return
-
     if ($item.type -eq "folder") {
         $name = $item.name ?? "Playlists"
 
@@ -71,7 +37,8 @@ function ProcessFolder($item, $indentation) {
         finally {
             Pop-Location
         }
-    } elseif ($item.type -eq "playlist") {
+    }
+    elseif ($item.type -eq "playlist") {
         $id = $item.uri -replace "spotify:\w+:", ""
         Write-Host "$("`t" * $indentation)$id`t" -NoNewLine
 
@@ -87,11 +54,11 @@ function ProcessPlaylist($id) {
     $name = $plDetails.name
     $nameSanitised = $name.Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
     $nameDir = "${nameSanitised} (Lyrics)"
-    # $plDetails | ConvertTo-Json | Set-Content "$id.json"
 
-    if ($plDetails.owner.id -eq $me) {
+    if (($plDetails.owner.id -eq $me) -or $fetchAllPlaylists) {
         Write-Host "$name"
-    } else {
+    }
+    else {
         Write-Host "$name - owned by $($plDetails.owner.display_name), skipping"
         return
     }
@@ -107,10 +74,10 @@ function ProcessPlaylist($id) {
 
         # add a simplified track object for each track to a playlist-scoped list
         $tracks += $pl.items | ForEach-Object { @{
-            Artist = $_.track.artists[0].name
-            Title  = $_.track.name
-            Album  = $_.track.album.name
-        } }
+                Artist = $_.track.artists[0].name
+                Title  = $_.track.name
+                Album  = $_.track.album.name
+            } }
 
         # fetch lyrics for all songs
         if ($getLyrics) {
@@ -122,7 +89,7 @@ function ProcessPlaylist($id) {
                     $url = $privateApiGetLyrics -replace "{id}", $id
 
                     try {
-                        # Write-Information "Got lyrics for $($track.track.name)"
+                        Write-Verbose "Got lyrics for $($track.track.name)"
                         $songNameSanitised = "$($track.track.name) - $($track.track.artists[0].name)".Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
                         $songFileName = "$songNameSanitised.txt"
 
@@ -142,7 +109,8 @@ function ProcessPlaylist($id) {
         # continue to next page of songs, if any
         if ($null -ne $pl.next) {
             $url = $pl.next
-        } else {
+        }
+        else {
             break
         }
     }
@@ -150,5 +118,36 @@ function ProcessPlaylist($id) {
     $tracks | ConvertTo-Json -Depth 10 | Set-Content "$nameSanitised.json"
 }
 
-$all = python ./spotifyfolders.py | ConvertFrom-Json
+function GetPlaylistFolderStructure() {
+    if (!(Test-Path "spotifyfolders.py" -PathType Leaf)) {
+        Write-Host "Spotify folder scraper not found, downloading..."
+    
+        Invoke-WebRequest "https://git.io/folders" -OutFile "spotifyfolders.py"
+    }
+    $all = python ./spotifyfolders.py | ConvertFrom-Json
+
+    return $all
+}
+
+
+
+# load helpers for authenticating against spotify
+. ./SpotifyAuth.ps1
+
+# request an actual auth access token
+$token = GetSpotifyAccessToken
+
+# and create header block from it
+$headers = @{
+    "Authorization" = "Bearer " + $token
+    "Content-Type"  = "application/json"
+}
+
+$privateApiHeaders = @{
+    "Authorization" = "Bearer " + $token # wrong token, FYI
+    "App-Platform"  = "WebPlayer"
+}
+
+$me = DetermineCallingUser
+$all = GetPlaylistFolderStructure
 ProcessFolder $all 0

@@ -1,4 +1,5 @@
 {
     "ClientId": "babcdebafed",
-    "ClientSecret": "0123456789dede"
+    "ClientSecret": "0123456789dede",
+    "RedirectUri": "https://localhost/callback"
 }
