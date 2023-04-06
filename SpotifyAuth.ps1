@@ -101,6 +101,7 @@ function GetWebPlayerAccessToken() {
 }
 
 # Even cheekier user impersonation by using the root auth cookie instead of just the access token
+# some insights gleaned from Syrics - https://github.com/akashrchandran/syrics/blob/main/syrics/api.py
 function GetSpDcAccessToken() {
     # api details
     $baseUrl = "https://open.spotify.com"

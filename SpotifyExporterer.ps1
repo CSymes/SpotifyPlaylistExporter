@@ -85,28 +85,30 @@ function ProcessPlaylist($id) {
             # create a new folder for each playlist to hold all lyric files in
             New-Item $nameDir -ItemType Directory -ea 0 | Out-Null
             Push-Location $nameDir
-            
+
             try {
+                $trackIndex = 0
                 foreach ($track in $pl.items) {
+                    ++$trackIndex
                     $id = $track.track.id
-                    $url = $privateApiGetLyrics -replace "{id}", $id
 
-                    $songNameSanitised = "$($track.track.name) - $($track.track.artists[0].name)".Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
+                    $songNameSanitised = "$trackIndex. $($track.track.name) - $($track.track.artists[0].name)".Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
                     $songFileName = "$songNameSanitised.txt"
-
+                
                     # skip lyrics we've already fetched - unlike playlist contents, we don't expect them to vary over time
                     if (Test-Path $songFileName -PathType Leaf) {
                         continue
                     }
+                    else {
+                        $lyrics = GetTrackLyrics $id
 
-                    try {
-                        $lyrics = Invoke-RestMethod -Uri "$url" -Method GET -Headers $privateApiHeaders
-
-                        $lyrics.lyrics.lines | ForEach-Object { $_.words } | Set-Content $songFileName
-                        Write-Verbose "Got lyrics for $($track.track.name)"
-                    }
-                    catch {
-                        Write-Warning "No lyrics found for $($track.track.name) ($id)"
+                        if ($null -ne $lyrics) {
+                            Write-Verbose "Got lyrics for $($track.track.name)"
+                            $lyrics | Set-Content $songFileName
+                        }
+                        else {
+                            Write-Warning "No lyrics found for $($track.track.name) ($id)"
+                        }
                     }
                 }
             }
@@ -127,7 +129,33 @@ function ProcessPlaylist($id) {
     $tracks | ConvertTo-Json -Depth 10 | Set-Content "$nameSanitised.json"
 }
 
+function GetTrackLyrics($id) {
+    # there isn't a reasonably accessible API with much song coverage that I was able to glean,
+    # so we are a bit cheeky and use Spotify's own internal lyrics API to do this.
+    # obviously we're not meant to use this undocumented API, and it's not usable with a standard
+    # app OAuth token... however we can access it by impersonating a user directly and using theirs.
+
+    # (aside - lyrics.ovh seems reasonable, but I had issues getting it to work, so not sure of its track stock)
+
+    $url = $privateApiGetLyrics -replace "{id}", $id
+
+    try {
+        $lyrics = Invoke-RestMethod -Uri "$url" -Method GET -Headers $privateApiHeaders
+
+        return $lyrics.lyrics.lines | ForEach-Object { $_.words }
+    }
+    catch {
+        return $null
+    }
+}
+
 function GetPlaylistFolderStructure() {
+    # because there's no official folder API, and spotify don't seem to have any interest in adding one,
+    # https://github.com/spotify/web-api/issues/38
+    # we use mikez's spotifyfolders script to rip the structure out of the local cache.
+    # it logically follows then that this will only work on a machine where you are logged in as the
+    # user and that structure is cached locally.
+
     if (!(Test-Path "spotifyfolders.py" -PathType Leaf)) {
         Write-Host "Spotify folder scraper not found, downloading..."
     
@@ -158,7 +186,7 @@ switch ($authMethod) {
     }
 }
 
-# and create header block from it
+# and create header blocks from it
 $headers = @{
     "Authorization" = "Bearer " + $token
     "Content-Type"  = "application/json"
