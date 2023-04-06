@@ -1,0 +1,6 @@
+*.secret
+*.secret.*
+
+spotifyfolders.py
+
+Playlists
