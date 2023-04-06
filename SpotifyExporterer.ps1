@@ -1,6 +1,7 @@
 param(
-    [switch] $getLyrics = $false,
-    [switch] $fetchAllPlaylists = $false
+    [ValidateSet("Oauth", "WebPlayer", "Cookie")] $authMethod = "Cookie",
+    [Switch] $getLyrics = $false,
+    [Switch] $fetchAllPlaylists = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -81,8 +82,10 @@ function ProcessPlaylist($id) {
 
         # fetch lyrics for all songs
         if ($getLyrics) {
+            # create a new folder for each playlist to hold all lyric files in
             New-Item $nameDir -ItemType Directory -ea 0 | Out-Null
             Push-Location $nameDir
+            
             try {
                 foreach ($track in $pl.items) {
                     $id = $track.track.id
@@ -98,6 +101,7 @@ function ProcessPlaylist($id) {
 
                     try {
                         $lyrics = Invoke-RestMethod -Uri "$url" -Method GET -Headers $privateApiHeaders
+
                         $lyrics.lyrics.lines | ForEach-Object { $_.words } | Set-Content $songFileName
                         Write-Verbose "Got lyrics for $($track.track.name)"
                     }
@@ -140,7 +144,19 @@ function GetPlaylistFolderStructure() {
 . ./SpotifyAuth.ps1
 
 # request an actual auth access token
-$token = GetSpotifyAccessToken
+switch ($authMethod) {
+    "Oauth" {
+        if ($getLyrics) { throw "Cannot fetch lyrics using OAuth authentication!" }
+
+        $token = GetSpotifyAccessToken
+    }
+    "WebPlayer" {
+        $token = GetWebPlayerAccessToken
+    }
+    "Cookie" {
+        $token = GetSpDcAccessToken
+    }
+}
 
 # and create header block from it
 $headers = @{
@@ -149,7 +165,7 @@ $headers = @{
 }
 
 $privateApiHeaders = @{
-    "Authorization" = "Bearer " + $token # wrong token, FYI
+    "Authorization" = "Bearer " + $token
     "App-Platform"  = "WebPlayer"
 }
 

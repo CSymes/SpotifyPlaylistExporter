@@ -1,6 +1,6 @@
 # Do everything by the books, using OAuth with an app registration etc.
 function GetSpotifyAccessToken() {
-    # load details about the app we're running as from disk
+    # load details about the app we"re running as from disk
     $clientDetails = Get-Content "app_details.secret.json" | ConvertFrom-Json
     $clientID = $clientDetails.ClientId
     $clientSecret = $clientDetails.ClientSecret
@@ -11,13 +11,14 @@ function GetSpotifyAccessToken() {
     $authAuth = "/authorize"
     $authToken = "/api/token"
 
-    # check if we've previously run and a refresh token is available for us to pick up from first
-    if (Test-Path "refresh.secret" -PathType Leaf) {
+    $refreshTokenFilename = "refresh.secret"
+
+    # check if we"ve previously run and a refresh token is available for us to pick up from first
+    if (Test-Path $refreshTokenFilename -PathType Leaf) {
         Write-Host "Detected existing refresh token..."
 
         # load from disk and decrypt
-        $refreshSecure = Get-Content "refresh.secret" | ConvertTo-SecureString
-        $refreshCode = [System.Net.NetworkCredential]::new("", $refreshSecure).Password
+        $refreshCode = DecodeEncryptedFile $refreshTokenFilename
 
         # Exchange the authorization code for an access token
         $tokenBody = @{
@@ -73,11 +74,12 @@ function GetSpotifyAccessToken() {
     # if it's the first time, or they feel like reissuing our refresh token, store it for later
     if ($null -ne $tokenResponse.refresh_token) {
         Write-Host "Got new access token, so saving it."
-        # encrypt the token before saving it - it's basic, but should prevent decoding it off-machine at least
-        ConvertTo-SecureString -AsPlainText $tokenResponse.refresh_token | ConvertFrom-SecureString | Set-Content "refresh.secret"
+        # encrypt the token before saving it - it"s basic, but should prevent decoding it off-machine at least
+        EncryptTextToFile $refreshTokenFilename $tokenResponse.refresh_token
     }
 
-    Write-Host "Got access token!"
+    $expiry = $tokenResponse.expires_in / 60
+    Write-Host "Got access token via OAuth - expires in ${expiry}min"
 
     return $tokenResponse.access_token
 }
@@ -91,11 +93,64 @@ function GetWebPlayerAccessToken() {
     Start-Process $tokenGenerator
     $tokenResponse = (Read-Host "Enter the provided JSON token response:") | ConvertFrom-Json
 
-    # log out the time until the token expires - usually somewhere in the range of an hour, but I'm not sure when they reissue
-    $expiryDeltaSeconds = $tokenResponse.accessTokenExpirationTimestampMs / 1000 - (Get-Date -UFormat %s)
-    $expiryDeltaMinutes = [math]::Round($expiryDeltaSeconds / 60)
-
-    Write-Host "Got webplayer access token, expires in ${expiryDeltaMinutes}min"
+    # log out the time until the token expires - usually somewhere in the range of an hour, but I"m not sure when they reissue
+    $expiry = GetExpiryMinutes $tokenResponse.accessTokenExpirationTimestampMs
+    Write-Host "Got webplayer access token, expires in ${expiry}min"
 
     return $tokenResponse.accessToken
+}
+
+# Even cheekier user impersonation by using the root auth cookie instead of just the access token
+function GetSpDcAccessToken() {
+    # api details
+    $baseUrl = "https://open.spotify.com"
+    $tokenGenEndpoint = "/get_access_token"
+
+    # encryption store
+    $spdcFilename = "sp_dc.secret"
+    $shouldWrite = $false
+
+    # check if we've previously saved an sp_dc cookie, or if we need to request it from the user
+    if (Test-Path $spdcFilename -PathType Leaf) {
+        $sp_dc = DecodeEncryptedFile $spdcFilename
+    }
+    else {
+        Start-Process $baseUrl
+        $sp_dc = (Read-Host "Enter the value of the sp_dc cookie:")
+
+        $shouldWrite = $true
+    }
+
+    # verbosely create a session to allow sending a cookie in our rest invocation
+    $session = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
+    $cookie = [System.Net.Cookie]::new("sp_dc", $sp_dc)
+    $session.Cookies.Add($baseUrl, $cookie)
+    $session.Headers.Add("App-Platform", "WebPlayer")
+    
+    $tokenResponse = Invoke-RestMethod -Method GET -Uri "$baseUrl$tokenGenEndpoint" -WebSession $session
+
+    # save sp_dc now it's confirmed to be valid
+    if ($shouldWrite) {
+        EncryptTextToFile $spdcFilename $sp_dc
+    }
+
+    $expiry = GetExpiryMinutes $tokenResponse.accessTokenExpirationTimestampMs
+    Write-Host "Got access token via cookie, expires in ${expiry}min"
+
+    return $tokenResponse.accessToken
+}
+
+function DecodeEncryptedFile($path) {
+    $textSecure = Get-Content $path | ConvertTo-SecureString
+    return [System.Net.NetworkCredential]::new("", $textSecure).Password
+}
+
+function EncryptTextToFile($path, $text) {
+    ConvertTo-SecureString -AsPlainText $text | ConvertFrom-SecureString | Set-Content $path
+}
+
+function GetExpiryMinutes($unixTime) {
+    $expiryDeltaSeconds = $unixTime / 1000 - (Get-Date -UFormat %s)
+    $expiryDeltaMinutes = [math]::Round($expiryDeltaSeconds / 60)
+    return $expiryDeltaMinutes
 }
