@@ -2,7 +2,8 @@ param(
     [ValidateSet("Oauth", "WebPlayer", "Cookie")] $authMethod = "Cookie",
     [Switch] $getLyrics = $false,
     [Switch] $fetchAllPlaylists = $false,
-    [Switch] $recheckMissingLyrics = $false
+    [Switch] $recheckMissingLyrics = $false,
+    [string] $playlist = $null
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,9 +43,25 @@ function ProcessFolder($item, $indentation) {
     }
     elseif ($item.type -eq "playlist") {
         $id = $item.uri -replace "spotify:\w+:", ""
+
+        # skip if the id string was malformed
+        if ([string]::IsNullOrEmpty($id)) {
+            return
+        }
+
+        # abort if a specific playlist ID has been targetted and this isn't it
+        if (!([string]::IsNullOrEmpty($playlist)) -and ($id -ne $playlist)) {
+            return
+        }
+
         Write-Host "$("`t" * $indentation)$id`t" -NoNewLine
 
         ProcessPlaylist $id
+
+        # no point continuing, if we were targetting a specific playlist and this was it
+        if ($id -eq $playlist) {
+            exit
+        }
     }
 }
 
