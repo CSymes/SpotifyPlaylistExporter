@@ -1,7 +1,8 @@
 param(
     [ValidateSet("Oauth", "WebPlayer", "Cookie")] $authMethod = "Cookie",
     [Switch] $getLyrics = $false,
-    [Switch] $fetchAllPlaylists = $false
+    [Switch] $fetchAllPlaylists = $false,
+    [Switch] $recheckMissingLyrics = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -103,11 +104,17 @@ function ProcessPlaylist($id) {
                     $fqName = "$trackIndex. $trackName - $trackArtist"
                     $fqNameSanitised = $fqName.Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
                     $lyricsFileName = "$fqNameSanitised.txt"
+                    $lyricsFileNameNoLyrics = "${fqNameSanitised}_NoKnownLyrics.txt"
                 
                     # skip lyrics we've already fetched - unlike playlist contents, we don't expect them to vary over time
                     if (Test-Path $lyricsFileName -PathType Leaf) {
                         continue
                     }
+                    # skip tracks we've previously checked and couldn't find lyrics for, unless we explicitly want to re-check them
+                    elseif ((Test-Path $lyricsFileNameNoLyrics -PathType Leaf) -and ($recheckMissingLyrics -eq $false)) {
+                        continue
+                    }
+                    # attempt to find lyrics for this track
                     else {
                         $lyrics = GetTrackLyrics $id
 
@@ -117,6 +124,7 @@ function ProcessPlaylist($id) {
                         }
                         else {
                             Write-Warning "No lyrics found for $fqName ($id)"
+                            $null | Set-Content -LiteralPath $lyricsFileNameNoLyrics
                         }
                     }
                 }
