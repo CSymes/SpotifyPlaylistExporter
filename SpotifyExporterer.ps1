@@ -73,6 +73,11 @@ function ProcessPlaylist($id) {
     while ($true) {
         $pl = Invoke-RestMethod -Uri "$url" -Method GET -Headers $headers
 
+        # ensure there are some tracks to bother with
+        if (($null -eq $pl.items) -or ($pl.items.Count -eq 0)) {
+            break
+        }
+
         # add a simplified track object for each track to a playlist-scoped list
         $tracks += $pl.items | ForEach-Object { @{
                 Artist = $_.track.artists[0].name
