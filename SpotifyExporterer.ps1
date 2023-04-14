@@ -78,9 +78,11 @@ function ProcessPlaylist($id) {
         if (($null -eq $pl.items) -or ($pl.items.Count -eq 0)) {
             break
         }
+        # filter out any items with a null track property (not quite clear why this happens sometimes, there isn't a missing track)
+        $validItems = $pl.items | Where { $null -ne $_?.track }
 
         # add a simplified track object for each track to a playlist-scoped list
-        $tracks += $pl.items | ForEach-Object { @{
+        $tracks += $validItems | ForEach-Object { @{
                 Artist = $_.track.artists[0].name
                 Title  = $_.track.name
                 Album  = $_.track.album.name
@@ -94,7 +96,7 @@ function ProcessPlaylist($id) {
 
             try {
                 $trackIndex = 0
-                foreach ($track in $pl.items) {
+                foreach ($track in $validItems) {
                     ++$trackIndex
 
                     $id = $track.track.id
