@@ -105,8 +105,8 @@ function ProcessPlaylist($id) {
         if (($null -eq $pl.items) -or ($pl.items.Count -eq 0)) {
             break
         }
-        # filter out any items with a null track property (not quite clear why this happens sometimes, there isn't a missing track)
-        $validItems = $pl.items | Where { $null -ne $_?.track }
+        # filter out any items with a null track property (not quite clear why this happens sometimes, there isn't a (visibly) missing track)
+        $validItems = $pl.items | Where-Object { $null -ne ${_}?.track }
 
         # add a simplified track object for each track to a playlist-scoped list
         $tracks += $validItems | ForEach-Object { @{
@@ -172,7 +172,7 @@ function ProcessPlaylist($id) {
         }
     }
 
-    $tracks | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath "$nameSanitised.json"
+    ConvertTo-Json -Depth 10 $tracks | Set-Content -LiteralPath "$nameSanitised.json"
 }
 
 function GetTrackLyrics($id) {
