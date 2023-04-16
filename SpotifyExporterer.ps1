@@ -13,7 +13,6 @@ $maxAuthRetries = 3
 $apiBase = "https://api.spotify.com/v1"
 $apiGetMe = "/me"
 $apiGetPlaylist = "/playlists/{id}"
-$apiGetPlaylistItems = "/playlists/{id}/tracks"
 $privateApiGetLyrics = "https://spclient.wg.spotify.com/color-lyrics/v2/track/{id}?format=json&vocalRemoval=false";
 
 
@@ -68,7 +67,7 @@ function ProcessFolder($item, $indentation) {
 
 function ProcessPlaylist($id) {
     $plUrl = "$apiBase$apiGetPlaylist" -replace "{id}", $id
-    $plFields = "name,owner(id,display_name),public,collaborative"
+    $plFields = "name,owner(id,display_name),tracks(next,items(track(id,name,album.name,artists(name))))"
     $plUrl = "$plUrl`?fields=$plFields"
 
     try {
@@ -93,22 +92,17 @@ function ProcessPlaylist($id) {
         return
     }
 
-    $fields = "next,items(track(id,name,album.name,artists(name)))"
-    $url = "$apiBase$apiGetPlaylistItems" -replace "{id}", $id
-    $url = "$url`?fields=$fields"
-
+    $apiTracks = $plDetails.tracks
     $tracks = @()
 
-    while ($true) {
-        # SPEEDUP: use the getPlaylist api request to get the first page
-        $pl = CallApiEndpoint $url $headers
+    while ($null -ne $apiTracks) {
 
         # ensure there are some tracks to bother with
-        if (($null -eq $pl.items) -or ($pl.items.Count -eq 0)) {
+        if (($null -eq $apiTracks.items) -or ($apiTracks.items.Count -eq 0)) {
             break
         }
         # filter out any items with a null track property (not quite clear why this happens sometimes, there isn't a (visibly) missing track)
-        $validItems = $pl.items | Where-Object { $null -ne ${_}?.track }
+        $validItems = $apiTracks.items | Where-Object { $null -ne ${_}?.track }
 
         # add a simplified track object for each track to a playlist-scoped list
         $tracks += $validItems | ForEach-Object { @{
@@ -166,11 +160,11 @@ function ProcessPlaylist($id) {
         }
 
         # continue to next page of songs, if any
-        if ($null -ne $pl.next) {
-            $url = $pl.next
+        if ($null -ne $apiTracks.next) {
+            $apiTracks = CallApiEndpoint $apiTracks.next $headers
         }
         else {
-            break
+            $apiTracks = $null
         }
     }
 
