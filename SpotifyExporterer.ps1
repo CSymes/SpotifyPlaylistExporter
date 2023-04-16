@@ -132,11 +132,11 @@ function ProcessPlaylist($id) {
                     $lyricsFileNameNoLyrics = "${fqNameSanitised}_NoKnownLyrics.txt"
                 
                     # skip lyrics we've already fetched - unlike playlist contents, we don't expect them to vary over time
-                    if (Test-Path $lyricsFileName -PathType Leaf) {
+                    if (FileExists $lyricsFileName) {
                         continue
                     }
                     # skip tracks we've previously checked and couldn't find lyrics for, unless we explicitly want to re-check them
-                    elseif ((Test-Path $lyricsFileNameNoLyrics -PathType Leaf) -and ($recheckMissingLyrics -eq $false)) {
+                    elseif (FileExists $lyricsFileNameNoLyrics -and -not $recheckMissingLyrics) {
                         continue
                     }
                     # attempt to find lyrics for this track
@@ -146,6 +146,11 @@ function ProcessPlaylist($id) {
                         if ($null -ne $lyrics) {
                             Write-Verbose "Got lyrics for $fqName"
                             $lyrics | Set-Content -LiteralPath $lyricsFileName
+
+                            # we're forcefully rechecking missing lyrics files, and found a match, so delete the old placeholder
+                            if ($recheckMissingLyrics -and (FileExists $lyricsFileNameNoLyrics)) {
+                                Remove-Item -LiteralPath $lyricsFileNameNoLyrics
+                            }
                         }
                         else {
                             Write-Warning "No lyrics found for $fqName ($id)"
@@ -198,7 +203,7 @@ function GetPlaylistFolderStructure() {
     # it logically follows then that this will only work on a machine where you are logged in as the
     # user and that structure is cached locally.
 
-    if (!(Test-Path "spotifyfolders.py" -PathType Leaf)) {
+    if (!(FileExists "spotifyfolders.py")) {
         Write-Host "Spotify folder scraper not found, downloading..."
     
         Invoke-WebRequest "https://git.io/folders" -OutFile "spotifyfolders.py"
@@ -221,20 +226,33 @@ function CallApiEndpoint($url, $headers) {
             return $result
         }
         catch {
-            $err = ($_ | ConvertFrom-Json)?.error
+            $ex = $_.Exception
+            $msg = $null
+            $code = $null
+
+            if ($ex -is [string]) {
+                $err = ($ex | ConvertFrom-Json).error
+                $msg = $err.message
+                $code = $err.status
+            } elseif ($ex -is [Microsoft.PowerShell.Commands.HttpResponseException]) {
+                $code = $ex.Response.StatusCode.value__ 
+                $msg = $ex.Response.ReasonPhrase
+            }
+            else {
+                throw
+            }
 
             # Unauthorised - token probably expired
-            if (${err}?.status -eq 401) {
-
-                Write-Host "Experienced $($err.status) while calling API ($($err.message)) (try $retry), " -NoNewline
+            if ($code -eq 401) {
+                $msgPrefix = "Experienced $code while calling API ($msg) (try $retry)"
 
                 $wait = $([Math]::Pow(2, $retry) - 1)
                 if ($retry -eq $maxAuthRetries) {
-                    Write-Host "could not re-authenticate!" 
+                    Write-Error "$msgPrefix, could not re-authenticate!" 
                     exit
                 }
                 else { 
-                    Write-Host "retrying..." 
+                    Write-Warning "$msgPrefix, retrying..." 
                     Start-Sleep -Seconds $wait
                     AuthAndSetTokens
                     continue
@@ -272,6 +290,10 @@ function AuthAndSetTokens() {
         "Authorization" = "Bearer " + $token
         "App-Platform"  = "WebPlayer"
     }
+}
+
+function FileExists($path) {
+    return Test-Path -PathType Leaf -LiteralPath $path
 }
 
 
