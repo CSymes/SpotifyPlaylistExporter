@@ -69,7 +69,17 @@ function ProcessPlaylist($id) {
     $plUrl = "$apiBase$apiGetPlaylist" -replace "{id}", $id
     $plFields = "name,owner(id,display_name),public,collaborative"
     $plUrl = "$plUrl`?fields=$plFields"
-    $plDetails = Invoke-RestMethod -Uri "$plUrl" -Method GET -Headers $headers
+
+    try {
+        $plDetails = Invoke-RestMethod -Uri "$plUrl" -Method GET -Headers $headers
+    }
+    catch {
+        $err = ($_ | ConvertFrom-Json)?.error
+        $msg = ($null -eq $err) ? "unknown - $_" : "$($err.status) - $($err.message)"
+        Write-Host "error $msg"
+        return
+    }
+    
     $name = $plDetails.name
     $nameSanitised = $name.Split([IO.Path]::GetInvalidFileNameChars()) -join '_'
     $nameDir = "${nameSanitised} (Lyrics)"
