@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$maxAuthRetries = 3
 
 # general API endpoint consts
 $apiBase = "https://api.spotify.com/v1"
@@ -18,7 +19,7 @@ $privateApiGetLyrics = "https://spclient.wg.spotify.com/color-lyrics/v2/track/{i
 
 
 function DetermineCallingUser() {
-    $meResponse = Invoke-RestMethod -Uri "$apiBase$apiGetMe" -Method GET -Headers $headers
+    $meResponse = CallApiEndpoint "$apiBase$apiGetMe" $headers
 
     Write-Host "Running as $($meResponse.display_name) ($($meResponse.id))"
 
@@ -71,7 +72,7 @@ function ProcessPlaylist($id) {
     $plUrl = "$plUrl`?fields=$plFields"
 
     try {
-        $plDetails = Invoke-RestMethod -Uri "$plUrl" -Method GET -Headers $headers
+        $plDetails = CallApiEndpoint $plUrl $headers
     }
     catch {
         $err = ($_ | ConvertFrom-Json)?.error
@@ -99,7 +100,8 @@ function ProcessPlaylist($id) {
     $tracks = @()
 
     while ($true) {
-        $pl = Invoke-RestMethod -Uri "$url" -Method GET -Headers $headers
+        # SPEEDUP: use the getPlaylist api request to get the first page
+        $pl = CallApiEndpoint $url $headers
 
         # ensure there are some tracks to bother with
         if (($null -eq $pl.items) -or ($pl.items.Count -eq 0)) {
@@ -186,7 +188,7 @@ function GetTrackLyrics($id) {
     $url = $privateApiGetLyrics -replace "{id}", $id
 
     try {
-        $lyrics = Invoke-RestMethod -Uri "$url" -Method GET -Headers $privateApiHeaders
+        $lyrics = CallApiEndpoint $url $privateApiHeaders
 
         return $lyrics.lyrics.lines | ForEach-Object { $_.words }
     }
@@ -212,36 +214,79 @@ function GetPlaylistFolderStructure() {
     return $all
 }
 
+function CallApiEndpoint($url, $headers) {
+    foreach ($retry in (0..$maxAuthRetries)) {
+        try {
+            $result = Invoke-RestMethod -Uri "$url" -Method GET -Headers $headers
+
+            # the initial request failed, and this is a successful retry
+            if ($retry -gt 0) {
+                Write-Host "Following request succeeded!"
+            }
+
+            return $result
+        }
+        catch {
+            $err = ($_ | ConvertFrom-Json)?.error
+
+            # Unauthorised - token probably expired
+            if (${err}?.status -eq 401) {
+
+                Write-Host "Experienced $($err.status) while calling API ($($err.message)) (try $retry), " -NoNewline
+
+                $wait = $([Math]::Pow(2, $retry) - 1)
+                if ($retry -eq $maxAuthRetries) {
+                    Write-Host "could not re-authenticate!" 
+                    exit
+                }
+                else { 
+                    Write-Host "retrying..." 
+                    Start-Sleep -Seconds $wait
+                    AuthAndSetTokens
+                    continue
+                }
+            }
+            else {
+                throw
+            }
+        }
+    }
+}
+
+function AuthAndSetTokens() {
+    switch ($authMethod) {
+        "Oauth" {
+            if ($getLyrics) { throw "Cannot fetch lyrics using OAuth authentication!" }
+    
+            $token = GetSpotifyAccessToken
+        }
+        "WebPlayer" {
+            $token = GetWebPlayerAccessToken
+        }
+        "Cookie" {
+            $token = GetSpDcAccessToken
+        }
+    }
+    
+    # and create header blocks from it
+    $script:headers = @{
+        "Authorization" = "Bearer " + $token
+        "Content-Type"  = "application/json"
+    }
+    
+    $script:privateApiHeaders = @{
+        "Authorization" = "Bearer " + $token
+        "App-Platform"  = "WebPlayer"
+    }
+}
+
 
 
 # load helpers for authenticating against spotify
 . ./SpotifyAuth.ps1
 
 # request an actual auth access token
-switch ($authMethod) {
-    "Oauth" {
-        if ($getLyrics) { throw "Cannot fetch lyrics using OAuth authentication!" }
-
-        $token = GetSpotifyAccessToken
-    }
-    "WebPlayer" {
-        $token = GetWebPlayerAccessToken
-    }
-    "Cookie" {
-        $token = GetSpDcAccessToken
-    }
-}
-
-# and create header blocks from it
-$headers = @{
-    "Authorization" = "Bearer " + $token
-    "Content-Type"  = "application/json"
-}
-
-$privateApiHeaders = @{
-    "Authorization" = "Bearer " + $token
-    "App-Platform"  = "WebPlayer"
-}
+AuthAndSetTokens
 
 $me = DetermineCallingUser
 $all = GetPlaylistFolderStructure
